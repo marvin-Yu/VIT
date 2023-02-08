@@ -1,0 +1,5 @@
+# pip install -r requirements.txt
+torch==1.13.1
+torchvision
+torchaudio
+intel-extension-for-pytorch==1.13.0

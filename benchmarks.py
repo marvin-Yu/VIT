@@ -11,7 +11,7 @@ def generate_inputs(name, default_path_prefix="models/"):
     _inputs = []
     json_file = default_path_prefix + name + ".json"
     with open(json_file, 'r') as js:
-        text = json.loads(js.read())
+        text = json.loads("{" + js.read() + "}")
         for item in text["graph_inputs"]:
             _dtype = item["dtype"]
             if "int" in str(_dtype):
@@ -26,8 +26,6 @@ def main(opt):
     default_models = ["video_clip", "yueyi_cv"]
     models = opt.models if len(opt.models) > 0 else default_models
     for name in models:
-
-        print(name)
         model = generate_model(name)
         inputs = generate_inputs(name)
 
@@ -41,9 +39,9 @@ def main(opt):
         costTime = time.time()-tic  # 总耗时
 
         print()
-        print(">" * 15, "marvin test", ">" * 15)
+        print(">" * 15, "test", ">" * 15)
         print('>>> ', name, ': total time ', costTime, 's, qps:', opt.iters / costTime)
-        print("<" * 15, "marvin test", "<" * 15)
+        print("<" * 15, "test", "<" * 15)
         print()
     pass
 
@@ -51,7 +49,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--models', type=str, default='', help='models, e.g. zk,yuanjun,...')
     parser.add_argument('--torch_th', type=int, default=1, help='Torch num threads.')
-    parser.add_argument('--iters', type=int, default=1, help='benchmark iteration.')
+    parser.add_argument('--iters', type=int, default=1000, help='benchmark iteration.')
     parser.add_argument('--ipex', action='store_true', help='enable ipex.')
     parser.add_argument('--inc', action='store_true', help='enable inc.')
     opt = parser.parse_args()
