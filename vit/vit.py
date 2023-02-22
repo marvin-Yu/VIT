@@ -8,10 +8,28 @@ image = dataset["test"]["image"][0]
 image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
 model = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
 
+model.eval()
+
+import vit_optimizer
+vit_optimizer.optimize_bert_encoder(model)
+print('*** Use the FUSED BERT, INT8=%r ***' % False)
+
 inputs = image_processor(image, return_tensors="pt")
 
-with torch.no_grad():
-    outputs = model(**inputs)
+# torch.onnx.export(model, inputs["pixel_values"], 'vit.onnx',
+#     input_names=["input"], output_names=["output"],
+#     dynamic_axes={'input': {0:'batch'}, 'output': {0:'batch'}})
 
-last_hidden_states = outputs.last_hidden_state
-print(list(last_hidden_states.shape))
+# outputs = model(**inputs)
+
+# warm up
+for _ in range(10):
+    model(**inputs)
+
+# benchmark
+import time
+start = time.time()
+for _ in range(10):
+    model(**inputs)
+end = time.time()
+print('10 times inference latency: %f seconds' % (end - start))

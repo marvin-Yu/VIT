@@ -1,4 +1,8 @@
-*.json
-*.pt
-*.pth
+*.log
+build/
+__*
+*.egg-info
+*.graph
+dist/
+mklml/
 *.onnx
