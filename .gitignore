@@ -1,3 +1,4 @@
 *.json
 *.pt
 *.pth
+*.onnx

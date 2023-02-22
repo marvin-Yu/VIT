@@ -54,59 +54,25 @@ def main(opt):
         # model.eval()
         # torch.onnx.export(model, inputs, name + ".onnx")
         import onnxruntime as ort
-        from onnxmltools.utils import float16_converter
         import numpy as np
         # x, y = test_data[0][0], test_data[0][1]
-        model = ort.InferenceSession('yueyi_cv.onnx')
-        outputs = model.run(None, {'argument_1.1': inputs[0].numpy()})
+        sess_options = ort.SessionOptions()
+        sess_options.intra_op_num_threads = 4
+        model = ort.InferenceSession('models/yueyi_cv.onnx', sess_options=sess_options)
+        # model = ort.InferenceSession('models/yueyi_cv_bf16.onnx', sess_options=sess_options)
+        # _input = inputs[0].numpy().astype(np.bfloat16)
+        _input = inputs[0].numpy()
+        outputs = model.run(None, {'modelInput': _input})
         # print(outputs)
-        
+
         # warmup
         for i in range(3):
-            _ = model.run(None, {'argument_1.1': inputs[0].numpy()})
+            _ = model.run(None, {'modelInput': _input})
 
         tic = time.time()
         for _ in range(opt.iters):
-            _ = model.run(None, {'argument_1.1': inputs[0].numpy()})
+            _ = model.run(None, {'modelInput': _input})
         costTime = time.time()-tic  # 总耗时
-        print()
-        print(">" * 15, "test", ">" * 15)
-        print('>>> ', name, ': total time ', costTime, 's, qps:', opt.iters / costTime)
-        print("<" * 15, "test", "<" * 15)
-        print()
-        return
-
-        # warmup
-        for i in range(3):
-            _ = model(*inputs)
-            
-        if opt.timeline:
-            profile(model, inputs)
-            return
-
-        # if opt.graph:
-        #     print(model.graph_for(*inputs))
-        #     return
-
-        if opt.dtype == "bf16":
-            with torch.cpu.amp.autocast(enabled=True, dtype=torch.bfloat16):
-                for i in range(3):
-                    _ = model(*inputs)
-
-                if opt.graph:
-                    print(model.graph_for(*inputs))
-                    return
-
-                tic = time.time()
-                for _ in range(opt.iters):
-                    _ = model(*inputs)
-                costTime = time.time()-tic  # 总耗时
-        else:
-            tic = time.time()
-            for _ in range(opt.iters):
-                _ = model(*inputs)
-            costTime = time.time()-tic  # 总耗时
-
         print()
         print(">" * 15, "test", ">" * 15)
         print('>>> ', name, ': total time ', costTime, 's, qps:', opt.iters / costTime)

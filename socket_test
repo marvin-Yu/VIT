@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# CI_DOCKER_EXTRA_PARAMS="--cpuset-cpus=48-49,144-145" ./docker_env bash
+core_head=48
+vcore_head=144
+
+for i in {0..23}
+do
+    new_head=$((core_head+i*2))
+    new_end=$((new_head+1))
+    new_vhead=$((vcore_head+i*2))
+    new_vend=$((new_vhead+1))
+    cpu_config="numactl -C $new_head-$new_end,$new_vhead-$new_vend"
+    $cpu_config python openVINO.py &
+    sleep 0.1
+done

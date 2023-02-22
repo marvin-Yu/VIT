@@ -3,3 +3,7 @@ torch==1.13.1
 torchvision
 torchaudio
 intel-extension-for-pytorch==1.13.0
+
+onnxruntime
+
+openvino-dev[pytorch,ONNX]==2022.3.0

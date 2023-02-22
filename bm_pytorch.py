@@ -15,7 +15,7 @@ def profile(model, inp):
             schedule=torch.profiler.schedule(
                 wait=5,
                 warmup=5,
-                active=3),
+                active=1),
             # on_trace_ready=trace_handler,
             on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
     ) as p:
@@ -44,37 +44,19 @@ def generate_inputs(name, default_path_prefix="models/", batch_size=1):
 
 def main(opt):
     # torch.set_num_threads(opt.torch_th)
-    # default_models = ["product", "video_clip", "yuanjun", "yueyi_cv", "zk"]
-    # default_models = ["video_clip", "yueyi_cv"]
     default_models = ["yueyi_cv"]
     models = opt.models if len(opt.models) > 0 else default_models
     for name in models:
         model = generate_model(name)
         inputs = generate_inputs(name, batch_size=opt.batch_size)
-        # model.eval()
-        # torch.onnx.export(model, inputs, name + ".onnx")
-        import onnxruntime as ort
-        from onnxmltools.utils import float16_converter
-        import numpy as np
-        # x, y = test_data[0][0], test_data[0][1]
-        model = ort.InferenceSession('yueyi_cv.onnx')
-        outputs = model.run(None, {'argument_1.1': inputs[0].numpy()})
-        # print(outputs)
-        
-        # warmup
-        for i in range(3):
-            _ = model.run(None, {'argument_1.1': inputs[0].numpy()})
+        model.eval()
 
-        tic = time.time()
-        for _ in range(opt.iters):
-            _ = model.run(None, {'argument_1.1': inputs[0].numpy()})
-        costTime = time.time()-tic  # 总耗时
-        print()
-        print(">" * 15, "test", ">" * 15)
-        print('>>> ', name, ': total time ', costTime, 's, qps:', opt.iters / costTime)
-        print("<" * 15, "test", "<" * 15)
-        print()
-        return
+        # def test(*args, **kargs):
+        #     print("nihao a")
+        #     return test.func(*args, **kargs)
+        
+        # test.func = model.online_network.backbone.patch_embed.proj.forward
+        # model.online_network.backbone.patch_embed.proj.forward = test
 
         # warmup
         for i in range(3):
@@ -83,10 +65,11 @@ def main(opt):
         if opt.timeline:
             profile(model, inputs)
             return
-
-        # if opt.graph:
-        #     print(model.graph_for(*inputs))
-        #     return
+        
+        if opt.graph:
+            # print(model.graph_for(*inputs))
+            print(model)
+            return
 
         if opt.dtype == "bf16":
             with torch.cpu.amp.autocast(enabled=True, dtype=torch.bfloat16):
