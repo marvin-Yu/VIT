@@ -1,9 +1,13 @@
 # pip install -r requirements.txt
-torch==1.13.1
+torch==1.13.0
 torchvision
 torchaudio
-intel-extension-for-pytorch==1.13.0
 
 onnxruntime
-
+intel-extension-for-pytorch==1.13.0
 openvino-dev[pytorch,ONNX]==2022.3.0
+
+transformers
+datasets
+Pillow
+numpy
