@@ -1,0 +1,14 @@
+"graph_inputs": [
+      {
+        "export_name": "input",
+        "shape": [
+          1,
+          30,
+          3,
+          224,
+          224
+        ],
+        "dtype": "float32",
+        "batch_idx": 0
+      }
+    ]

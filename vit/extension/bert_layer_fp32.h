@@ -117,17 +117,19 @@ public:
 
     // Do the forward computing for the whole BERT layer
     // input: (batchSize * maxTokenSize) x hidden_size
-    // mask: attention mask
     void forward(hpj::Matrix<float> &inputBuffer, 
-                 hpj::Matrix<float> &outBuffer, float *mask) {
+                 hpj::Matrix<float> &outBuffer) {
         auto hiddenSize = ctx->hiddenSize;
         auto& qkvMatMul = ctx->qkvMatMul;
         auto& resultBuffer1 = outBuffer;
         auto& resultBuffer2 = ctx->tmpBuffer;
         auto& intermediateBuffer = ctx->intermediateBuffer;
 
+        // batchmorm
+        batchnorm(inputBuffer, gamma1, beta1, resultBuffer2);
+
         // Query, Key, Value computed together
-        dense(inputBuffer, qkvWeight, qkvBias, qkvMatMul);
+        dense(resultBuffer2, qkvWeight, qkvBias, qkvMatMul);
 
         // BatchMatMul
         hpj::Matrix<float> query(qkvMatMul, 0, qkvMatMul.Rows(), 0, hiddenSize);
@@ -135,57 +137,31 @@ public:
         hpj::Matrix<float> value(qkvMatMul, 0, qkvMatMul.Rows(), hiddenSize*2, hiddenSize);
 
         batchMatMul(query, key, ctx->qk_result);
-       
-        // Softmax
-        computeSoftmax(mask);
 
-#ifdef DEBUG
-        printf("bert/encoder/layer_%d/attention/self/Softmax:\n", layerIdx);
-        printf("%f, %f, ...\n", ctx->qk_result[0][0], ctx->qk_result[0][1]);
-        printf("%f, %f, ...\n", ctx->qk_result[1][0], ctx->qk_result[1][1]);
-#endif
+        // Softmax
+        computeSoftmax();
 
         // BatchMatMul
         batchMatMul(ctx->qk_result, value, resultBuffer1);
-#ifdef DEBUG
-        printf("bert/encoder/layer_%d/attention/self/Reshape_3:\n", layerIdx);
-        dumpMatrix(resultBuffer1);
-#endif
 
         // dense
         denseWithSum(resultBuffer1, attentionOutputWeight, attentionOutputBias, inputBuffer, resultBuffer2);
-#ifdef DEBUG
-        printf("bert/encoder/layer_%d/attention/output/add:\n", layerIdx);
-        dumpMatrix(resultBuffer2);
-#endif
 
         // batchmorm
-        batchnorm(resultBuffer2, gamma1, beta1);
-#ifdef DEBUG
-        printf("bert/encoder/layer_%d/attention/output/LayerNorm/batchnorm/add_1:\n", layerIdx);
-        dumpMatrix(resultBuffer2);
-#endif
-        
+        batchnorm(resultBuffer2, gamma2, beta2, resultBuffer1);
+
         // intermediate
-        intermediate(resultBuffer2, intermediateBuffer);
-#ifdef DEBUG
-        printf("intermediate(bert/encoder/layer_%d/intermediate/dense/mul_1):\n", layerIdx);
-        dumpMatrix(intermediateBuffer);
-#endif
+        intermediate(resultBuffer1, intermediateBuffer);
 
         // dense in output
         denseWithSum(intermediateBuffer, outputWeight, outputBias, resultBuffer2, resultBuffer1);
-#ifdef DEBUG
-        printf("bert/encoder/layer_%d/output/add:\n", layerIdx);
-        dumpMatrix(resultBuffer1);
-#endif
-        
-        // batchnorm
-        batchnorm(resultBuffer1, gamma2, beta2);
-#ifdef DEBUG
-        printf("bert/encoder/layer_%d/output/LayerNorm/batchnorm/add_1:\n", layerIdx);
-        dumpMatrix(resultBuffer1);
-#endif
+
+        // if(layerIdx == 0){
+        //     printf(">>> intermediate:\n", layerIdx);
+        //     dumpMatrix(intermediateBuffer);
+        //     printf("\n \n >>> denseWithSum:\n", layerIdx);
+        //     dumpMatrix(resultBuffer1);
+        // }
     }
 
 private:
@@ -214,6 +190,9 @@ private:
     void dumpMatrix(hpj::Matrix<float> &m) {
         int cols = m.Cols();
         for (int i = 0; i < m.Rows(); ++i) {
+            if(i > 3 && i < m.Rows() - 3){
+                continue;
+            }
             if (m.Cols() < 10) {
                 for (int j = 0; j < m.Cols(); ++j) {
                     std::cout << m(i, j) << " ";
@@ -277,7 +256,7 @@ private:
     }
 
 #if __AVX512F__
-    void batchnorm(hpj::Matrix<float> &x, hpj::Vector<float> &gamma, hpj::Vector<float> &beta) {
+    void batchnorm(hpj::Matrix<float> &x, hpj::Vector<float> &gamma, hpj::Vector<float> &beta, hpj::Matrix<float> &result) {
         float *pgamma = gamma.Data();
         float *pbeta = beta.Data();
         int size = x.Cols();
@@ -285,6 +264,7 @@ private:
         #pragma omp parallel for
         for (int r = 0; r < x.Rows(); ++r) {
             float *px = x.Row(r);
+            float *rst = result.Row(r);
 
             float sum = 0;
             float squareSum = 0;
@@ -325,12 +305,12 @@ private:
                 __m512 vgamma = _mm512_maskz_loadu_ps(mask, pgamma + col);
                 __m512 vbeta = _mm512_maskz_loadu_ps(mask, pbeta + col);
                 __m512 vy = (vx - vmean) * vgamma * vvar + vbeta;
-                _mm512_mask_storeu_ps(px + col, mask, vy);
+                _mm512_mask_storeu_ps(rst + col, mask, vy);
             }
         }
     }
 #else
-    void batchnorm(hpj::Matrix<float> &x, hpj::Vector<float> &gamma, hpj::Vector<float> &beta) {
+    void batchnorm(hpj::Matrix<float> &x, hpj::Vector<float> &gamma, hpj::Vector<float> &beta, hpj::Matrix<float> &result) {
         assert(x.Rows() == ctx->batchSize * ctx->tokenSize);
         assert(x.Cols() == ctx->hiddenSize);
 
@@ -341,6 +321,7 @@ private:
         for (int i = 0; i < x.Rows(); ++i) {
             float sum = 0;
             float *px = x.Row(i);
+            float *rst = result.Row(i);
             #pragma omp simd
             for (int j = 0; j < x.Cols(); ++j) {
                 sum += px[j];
@@ -358,7 +339,7 @@ private:
 
             #pragma omp simd
             for (int j = 0; j < x.Cols(); ++j) {
-                px[j] = (px[j] - mean) * rvariance * pgamma[j] + pbeta[j];
+                rst[j] = (px[j] - mean) * rvariance * pgamma[j] + pbeta[j];
             }
         }
     }
@@ -571,7 +552,7 @@ private:
     }
 
     // General version
-    void computeSoftmax(float *data, float *att_mask) {
+    void computeSoftmax(float *data) {
         __m512 vsum = _mm512_set1_ps(0);
 
         // max_val is used to avoid exp(x) = inf
@@ -596,8 +577,7 @@ private:
             __mmask16 mask = (remain >= 16 ? 0xffff : (1 << remain) - 1);
 
             __m512 vx = _mm512_maskz_loadu_ps(mask, data + off);
-            __m512 vmask = _mm512_maskz_loadu_ps(mask, att_mask + off);
-            vx = BertUtil::vexp(vx * vfactor + vmask - vmax);
+            vx = BertUtil::vexp(vx * vfactor - vmax);
 
             _mm512_mask_storeu_ps(data + off, mask, vx);
 
@@ -620,7 +600,7 @@ private:
     }
 
     // input and output are both in qk_result
-    void computeSoftmax(float *mask) {
+    void computeSoftmax() {
 #pragma omp parallel for collapse(2)
         for (int b = 0; b < ctx->batchSize; ++b) {
             for (int i = 0; i < ctx->attHeadNum; ++i) {
@@ -628,7 +608,7 @@ private:
                 float *result = ctx->qk_result[b * ctx->attHeadNum + i];
 
                 for (int row = 0; row < ctx->tokenSize; ++row) {
-                    computeSoftmax(result, &mask[b * ctx->tokenSize]);
+                    computeSoftmax(result);
                     result += ctx->tokenSize;
                 }
             }

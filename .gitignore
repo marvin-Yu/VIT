@@ -1,3 +1,4 @@
+.vscode
 *.log
 build/
 __*
@@ -6,3 +7,4 @@ __*
 dist/
 mklml/
 *.onnx
+*.pt

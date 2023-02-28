@@ -1,0 +1,23 @@
+"graph_inputs": [
+      {
+        "export_name": "image",
+        "shape": [
+          1,
+          3,
+          32,
+          960
+        ],
+        "dtype": "float32",
+        "batch_idx": 0
+      },
+      {
+        "export_name": "tokens",
+        "shape": [
+          1,
+          1,
+          384
+        ],
+        "dtype": "float32",
+        "batch_idx": 0
+      }
+    ]

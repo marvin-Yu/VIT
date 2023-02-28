@@ -3,7 +3,7 @@ import sys
 import fused_bert
 from typing import Optional, Tuple, Union
 from transformers.modeling_outputs import (
-    BaseModelOutputWithPastAndCrossAttentions)
+    BaseModelOutput)
 
 # BertEncoder targets that we can accelerate
 hook_targets = [
@@ -55,34 +55,31 @@ def optimize_bert_encoder(model, is_int8=False):
 
     fused_bert.init_weights(weights, encoder_prefix)
 
-    # Replace BertEncoder's forward method with bert_encoder_forward
+    # Replace VitEncoder's forward method with bert_encoder_forward
     # The forward method of BertEncoder is in modeling_bert.py
-    def fused_forward_1_12(
+    def forward(
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        encoder_hidden_states: Optional[torch.FloatTensor] = None,
-        encoder_attention_mask: Optional[torch.FloatTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = False,
-        output_hidden_states: Optional[bool] = False,
-        return_dict: Optional[bool] = True,
-    ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPastAndCrossAttentions]:
-        # print("marvin:", type(attention_mask), attention_mask.shape)
-        attention_mask = torch.zeros(size=(1, 1, 1, 32))
-        result = fused_bert.forward(hidden_states, attention_mask)
-        return BaseModelOutputWithPastAndCrossAttentions(last_hidden_state=result, past_key_values=None, hidden_states=None, attentions=None, cross_attentions=None)
+        head_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
+        output_hidden_states: bool = False,
+        return_dict: bool = True,
+    ) -> Union[tuple, BaseModelOutput]:
+        result = fused_bert.forward(hidden_states)
+        return BaseModelOutput(
+        last_hidden_state=result,
+        hidden_states=None,
+        attentions=None,
+    )
 
     # Try to detect the BertEncoder
     succeed = False
     try:
-        model.encoder.forward = fused_forward_1_12
+        model.encoder.forward = forward
         succeed = True
     except:
         encoder = find_target_module(model)
         if encoder:
-            encoder.forward = fused_forward_1_12
+            encoder.forward = forward
             succeed = True
 
     if not succeed:

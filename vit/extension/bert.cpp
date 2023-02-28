@@ -41,7 +41,7 @@ public:
     }
   }
 
-  torch::Tensor forward(torch::Tensor &input, torch::Tensor &att_mask) {
+  torch::Tensor forward(torch::Tensor &input) {
     assert(input.dim() == 3);
     int batch_size = input.size(0);
     int seq_len = input.size(1);
@@ -51,7 +51,6 @@ public:
     ctx->resize(batch_size, seq_len);
 
     float* input_data = input.data_ptr<float>();
-    float* mask = att_mask.data_ptr<float>();
     hpj::Matrix<float> input_matrix(input_data, batch_size * seq_len, hidden_size, hidden_size);
     hpj::Matrix<float> *m_data = &input_matrix;
 
@@ -72,25 +71,25 @@ public:
 
       for (int i = 0; i < _num_hidden_layers - 1; ++i) {
         hpj::Matrix<float> &outBuffer = (i % 2 == 0 ? ctx->outBuffer1 : ctx->outBuffer2);
-        int8_bert_layers[i]->forward(*m_data, outBuffer, ctx->embQuantBuffer, ctx->embQuantBuffer, mask);
+        int8_bert_layers[i]->forward(*m_data, outBuffer, ctx->embQuantBuffer, ctx->embQuantBuffer);
         m_data = &outBuffer;
       }
       
       // Last layer, copy result to output tensor
       int last = _num_hidden_layers - 1;
-      int8_bert_layers[last]->forward(*m_data, out_matrix, ctx->embQuantBuffer, ctx->embQuantBuffer, mask);
+      int8_bert_layers[last]->forward(*m_data, out_matrix, ctx->embQuantBuffer, ctx->embQuantBuffer);
     }
     // FP32
     else {
       for (int i = 0; i < _num_hidden_layers - 1; ++i) {
         hpj::Matrix<float> &outBuffer = (i % 2 == 0 ? ctx->outBuffer1 : ctx->outBuffer2);
-        fp32_bert_layers[i]->forward(*m_data, outBuffer, mask);
+        fp32_bert_layers[i]->forward(*m_data, outBuffer);
         m_data = &outBuffer;
       }
       
       // Last layer, copy result to output tensor
       int last = _num_hidden_layers - 1;
-      fp32_bert_layers[last]->forward(*m_data, out_matrix, mask);
+      fp32_bert_layers[last]->forward(*m_data, out_matrix);
     }
 
     return output;
@@ -166,8 +165,8 @@ void bert_init(std::unordered_map<std::string, int> configs) {
   bert = new BertEncoder(ctx, num_hidden_layers);
 }
 
-torch::Tensor bert_forward(torch::Tensor input, torch::Tensor mask) {
-  return bert->forward(input, mask);
+torch::Tensor bert_forward(torch::Tensor input) {
+  return bert->forward(input);
 }
 
 void bert_init_weights(std::unordered_map<std::string, torch::Tensor> weights, std::string encoder_prefix) {

@@ -1,0 +1,12 @@
+"graph_inputs": [
+      {
+        "export_name": "augment_img1",
+        "shape": [
+          1,
+          3,
+          224,
+          224
+        ],
+        "dtype": "float32"
+      }
+    ]

@@ -143,7 +143,7 @@ class Int8BertLayer {
                  hpj::Matrix<float> &outBuffer,
                  hpj::Matrix<u8> &quantInput,
                  hpj::Matrix<u8> &quantOutput,
-                 float *mask, bool doQuant = true) {
+                 bool doQuant = true) {
         auto hiddenSize = ctx->hiddenSize;
         auto &qkvMatMul = ctx->qkvMatMul;
         auto &resultBuffer1 = outBuffer;
@@ -182,7 +182,7 @@ class Int8BertLayer {
 #endif
 
         // Softmax
-        computeSoftmax(mask);
+        computeSoftmax();
 
 #ifdef DEBUG
         printf("bert/encoder/layer_%d/attention/self/Softmax:\n", layerIdx);
@@ -987,7 +987,7 @@ class Int8BertLayer {
     }
 
     // General version
-    void computeSoftmax(float *data, float *att_mask) {
+    void computeSoftmax(float *data) {
         __m512 vsum = _mm512_set1_ps(0);
 
         // max_val is used to avoid exp(x) = inf
@@ -1012,8 +1012,7 @@ class Int8BertLayer {
             __mmask16 mask = (remain >= 16 ? 0xffff : (1 << remain) - 1);
 
             __m512 vx = _mm512_maskz_loadu_ps(mask, data + off);
-            __m512 vmask = _mm512_maskz_loadu_ps(mask, att_mask + off);
-            vx = BertUtil::vexp(vx * vfactor + vmask - vmax);
+            vx = BertUtil::vexp(vx * vfactor - vmax);
 
             _mm512_mask_storeu_ps(data + off, mask, vx);
 
@@ -1036,7 +1035,7 @@ class Int8BertLayer {
     }
 
     // input and output are both in qk_result
-    void computeSoftmax(float *mask) {
+    void computeSoftmax() {
 #pragma omp parallel for collapse(2)
         for (int b = 0; b < ctx->batchSize; ++b) {
             for (int i = 0; i < ctx->attHeadNum; ++i) {
@@ -1045,7 +1044,7 @@ class Int8BertLayer {
                 __mmask16 tail_mask = (ctx->tokenSize % 16 == 0 ? 0xffff : (1 << (ctx->tokenSize % 16)) - 1);
 
                 for (int row = 0; row < ctx->tokenSize; ++row) {
-                    computeSoftmax(result, &mask[b * ctx->tokenSize]);
+                    computeSoftmax(result);
                     result += ctx->tokenSize;
                 }
             }
