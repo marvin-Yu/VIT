@@ -5,7 +5,11 @@ build/
 __*
 *.egg-info
 *.graph
+*.pth
+*.bin
+*.json
 dist/
 mklml/
 *.onnx
 *.pt
+events.*
