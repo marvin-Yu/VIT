@@ -8,3 +8,6 @@ dist/
 mklml/
 *.onnx
 *.pt
+vit/calib/
+vit/compressed/
+vit/model/
