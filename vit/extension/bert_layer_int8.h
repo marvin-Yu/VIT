@@ -153,6 +153,8 @@ class Int8BertLayer {
         auto &embQuantBuffer = ctx->embQuantBuffer;
         auto &imQuantBuffer = ctx->imQuantBuffer;
 
+        batchnorm_Quant(inputBuffer, resultBuffer1, quantInput, gamma1, beta1);
+
         // Query, Key, Value computed together
         int8_gemm(quantInput, qkvWeight, qkvMatMul);
 
@@ -202,10 +204,9 @@ class Int8BertLayer {
                                      resultBuffer1.Rows(), resultBuffer1.Cols(),
                                      resultBuffer1.Stride(), embQuantBuffer.Stride());
 
-        // Self output (dense + LayerNorm + Quantization)
-        denseWithSum_LN_Quant(embQuantBuffer, attOutWeight, attOutCompensation, attOutBias,
-                              inputBuffer, resultBuffer2, embQuantBuffer,
-                              gamma1, beta1);
+        // Self output (dense + Quantization)
+        denseWithSum(embQuantBuffer, attOutWeight,              attOutCompensation, attOutBias,
+                              inputBuffer, resultBuffer2);
 #ifdef DEBUG
         printf("[Layer %d] self output:\n", layerIdx);
         dumpMatrix(resultBuffer2);
@@ -228,6 +229,7 @@ class Int8BertLayer {
         //        debugIF, embQuantBuffer.Scales()[0], debugIF * embQuantBuffer.Scales()[0],
         //        debugII, (debugII - imCompensation.Data()[0]) * embQuantBuffer.Scales()[0] * intermediateWeight.Scales()[0]);
 
+        batchnorm_Quant(resultBuffer2, resultBuffer1, embQuantBuffer, gamma2, beta2);
         // intermediate
         intermediate(embQuantBuffer, intermediateBuffer, imQuantBuffer);
 #ifdef DEBUG
@@ -253,8 +255,8 @@ class Int8BertLayer {
         //        debugII, (debugII - outputCompensation.Data()[0]) * imQuantBuffer.Scales()[0] * outputWeight.Scales()[0]);
 
         // dense in output
-        denseWithSum_LN_Quant(imQuantBuffer, outputWeight, outputCompensation, outputBias,
-                              resultBuffer2, outBuffer, quantOutput, gamma2, beta2);
+        denseWithSum(imQuantBuffer, outputWeight, outputCompensation, outputBias,
+                              resultBuffer2, outBuffer);
 #ifdef DEBUG
         printf("[Layer %d] output:\n", layerIdx);
         dumpMatrix(outBuffer);
@@ -460,7 +462,91 @@ class Int8BertLayer {
             }
 #endif
 
-            batchnormStats(presult, gamma.Data(), beta.Data(), size, rmax, rmin);
+            batchnormStats(presult, presult, gamma.Data(), beta.Data(), size, rmax, rmin);
+        }  // end for r
+
+        // Get quantization param
+        auto param = QuantizeUtil::affine_quantize_param(rmax, rmin, true);
+        *quantRet.Scales() = param.scale;
+        *quantRet.ZeroPoint() = param.zp;
+
+        // Do quantization
+        #pragma omp parallel for
+        for (int r = 0; r < result.Rows(); ++r) {
+            float *px = result.Row(r);
+            u8 *py = quantRet.Row(r);
+            QuantizeUtil::quantize_row(px, py, size, param);
+        }
+    }
+
+    // result = x * weight + bias + input
+    void denseWithSum(hpj::Matrix<u8> &x,
+                               hpj::Matrix<s8> &weight,
+                               hpj::Vector<float> &comp,
+                               hpj::Vector<float> &bias,
+                               hpj::Matrix<float> &input,
+                               hpj::Matrix<float> &result) {
+        assert(input.Rows() == result.Rows());
+        assert(input.Cols() == result.Cols());
+
+        // After gemm, the result is int32
+        int8_gemm(x, weight, result);
+
+        float *pbias = bias.Data();
+        const int size = result.Cols();
+        float rmax = 0, rmin = 0;
+
+#pragma omp parallel
+        for (int r = 0; r < result.Rows(); ++r) {
+            float *presult = result.Row(r);
+            float *pinput = input.Row(r);
+
+            __m512 vs1 = _mm512_set1_ps(x.Scales()[0]);
+            __m512 vzp = _mm512_set1_ps((float)(x.ZeroPoint()[0]));
+            __m512 vs2 = _mm512_set1_ps(weight.Scales()[0]);
+            float *compensation = comp.Data();
+
+            for (int col = 0; col < size; col += 16) {
+                int remain = size - col;
+                __mmask16 mask = (remain >= 16 ? 0xffff : (1 << remain) - 1);
+
+                // Apply compensation and dequantize
+                __m512i vx = _mm512_maskz_loadu_epi32(mask, presult + col);
+                __m512 vf = _mm512_cvt_roundepi32_ps(vx,
+                                                     _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+                __m512 vcomp = _mm512_maskz_loadu_ps(mask, compensation + col);
+                //__m512 vs2 = _mm512_maskz_loadu_ps(mask, inv_scalew + col);
+                __m512 vres = (vf - vzp * vcomp) * vs1 * vs2;
+
+                // Add input and bias
+                __m512 vinput = _mm512_maskz_loadu_ps(mask, pinput + col);
+                __m512 vbias = _mm512_maskz_loadu_ps(mask, pbias + col);
+                vres = vres + vbias + vinput;
+
+                // Store
+                _mm512_mask_storeu_ps(presult + col, mask, vres);
+            }
+        }  // end for r
+    }
+
+    // result = LayerNorm(input)
+    // quantRet = Quantize_u8(result)
+    void batchnorm_Quant(hpj::Matrix<float> &input,
+                         hpj::Matrix<float> &result,
+                         hpj::Matrix<u8> &quantRet,
+                         hpj::Vector<float> &gamma,
+                         hpj::Vector<float> &beta) {
+        assert(input.Rows() == result.Rows());
+        assert(input.Cols() == result.Cols());
+
+        const int size = result.Cols();
+        float rmax = 0, rmin = 0;
+
+#pragma omp parallel for reduction(max : rmax) reduction(min : rmin)
+        for (int r = 0; r < result.Rows(); ++r) {
+            float *pinput = input.Row(r);
+            float *presult = result.Row(r);
+            batchnormStats(pinput, presult, gamma.Data(), beta.Data(), size, rmax, rmin);
         }  // end for r
 
         // Get quantization param
@@ -525,7 +611,7 @@ class Int8BertLayer {
 
     // LayerNorm + Stats max/min value (note: max/min values are extended to include 0)
     // px = LayerNorm(px)
-    void batchnormStats(float *px, float *pgamma, float *pbeta, int size, float &rmax, float &rmin) {
+    void batchnormStats(float *px, float *py, float *pgamma, float *pbeta, int size, float &rmax, float &rmin) {
         float sum = 0;
         float squareSum = 0;
 
@@ -581,7 +667,7 @@ class Int8BertLayer {
             __m512 vgamma = _mm512_maskz_loadu_ps(mask, pgamma + col);
             __m512 vbeta = _mm512_maskz_loadu_ps(mask, pbeta + col);
             __m512 vy = (vx - vmean) * vvar * vgamma  + vbeta;
-            _mm512_mask_storeu_ps(px + col, mask, vy);
+            _mm512_mask_storeu_ps(py + col, mask, vy);
 
             vmax = _mm512_max_ps(vmax, vy);
             vmin = _mm512_min_ps(vmin, vy);
