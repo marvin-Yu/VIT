@@ -74,7 +74,8 @@ def optimize_bert_encoder(model, is_int8=False):
     # Try to detect the BertEncoder
     succeed = False
     try:
-        model.encoder.forward = forward
+        # model.encoder.forward = forward
+        model.base_model.encoder.forward = forward
         succeed = True
     except:
         encoder = find_target_module(model)

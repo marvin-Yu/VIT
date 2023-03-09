@@ -28,6 +28,7 @@
 #include "bert_quantize.h"
 #include "bert_util.h"
 #include "my_types.h"
+#include "matmul_manager.h"
 
 class Int8BertLayer {
    public:
@@ -97,7 +98,7 @@ class Int8BertLayer {
         memcpy(gamma2.Data(), _gamma2, sizeof(float) * hiddenSize);
         memcpy(beta2.Data(), _beta2, sizeof(float) * hiddenSize);
 
-#if !defined(USE_MKL)
+#if !defined(USE_MKL) && !defined(USE_ONEDNN)
         packWeight(qkvWeight);
         packWeight(attOutWeight);
         packWeight(intermediateWeight);
@@ -382,6 +383,22 @@ class Int8BertLayer {
                            B.Data(), B.Stride(), 0, beta,
                            reinterpret_cast<int *>(C.Data()), C.Stride(), &oc);
     }
+#elif defined(USE_ONEDNN)
+    template <typename T>
+    void int8_gemm(hpj::Matrix<u8> &A, hpj::Matrix<s8> &B, hpj::Matrix<T> &C) {
+        assert(B.Cols() == A.Cols());
+        assert(A.Cols() == A.Stride());
+        assert(B.Cols() == B.Stride());
+        assert(C.Cols() == C.Stride());
+        assert(sizeof(T) == 4);
+
+        int m = A.Rows();
+        int k = A.Cols();
+        int n = B.Rows();
+
+        MatMulManager::instance().doMatMul((uint8_t *)A.Data(), (int8_t *)B.Data(),
+                                           (int32_t *)C.Data(), m, n, k, true);
+    }
 #else
     template <typename T>
     void int8_gemm(hpj::Matrix<u8> &A, hpj::Matrix<s8> &B, hpj::Matrix<T> &C) {
@@ -389,7 +406,7 @@ class Int8BertLayer {
         int k = A.Cols();
         int n = C.Cols();
         igemm((uint8_t *)A.Data(), (int8_t *)B.Data(),
-              (int *)C.Data(), m, n, k, A.Stride(), C.Stride());
+              (int32_t *)C.Data(), m, n, k, A.Stride(), C.Stride());
     }
 #endif
 
@@ -496,7 +513,7 @@ class Int8BertLayer {
         const int size = result.Cols();
         float rmax = 0, rmin = 0;
 
-#pragma omp parallel
+#pragma omp parallel for reduction(max : rmax) reduction(min : rmin)
         for (int r = 0; r < result.Rows(); ++r) {
             float *presult = result.Row(r);
             float *pinput = input.Row(r);

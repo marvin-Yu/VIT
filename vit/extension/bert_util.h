@@ -46,6 +46,45 @@ struct compile_time_for<0> {
 
 class BertUtil {
    public:
+    static void dumpVector(hpj::Vector<float> &m, bool dumpAll = false) {
+        printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+        int i = 0;
+        while (i < m.Size()) {
+            std::cout<< m.Data()[i] << " ";
+            i += 1;
+        }
+        printf("\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n");
+    }
+
+    static void dumpMatrix(hpj::Matrix<float> &m, bool dumpAll = false) {
+        printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+        int cols = m.Cols();
+
+        int i = 0;
+        while (i < m.Rows()) {
+            if (i > 2 && i < m.Rows() - 3) {
+                printf("...\n");
+                i = m.Rows() - 3;
+                continue;
+            }
+            if (m.Cols() < 10 || dumpAll) {
+                for (int j = 0; j < m.Cols(); ++j) {
+                    // At most 12 elements in each line
+                    if (j > 0 && j % 12 == 0) {
+                        printf("\n");
+                    }
+                    printf("%13.5f,", m(i, j));
+                }
+            } else {
+                std::cout << m(i, 0) << " " << m(i, 1) << " " << m(i, 2) << " ... " << m(i, cols - 3) << " " << m(i, cols - 2) << " " << m(i, cols - 1);
+            }
+            std::cout << std::endl;
+
+            i += 1;
+        }
+        printf("\n<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n");
+    }
+
     static inline __m512 vexp(const __m512& _x) {
         __m512 p16f_1 = _mm512_set1_ps(1.0f);
         __m512 p16f_half = _mm512_set1_ps(0.5f);

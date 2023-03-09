@@ -8,6 +8,7 @@
 #include "bert_layer_fp32.h"
 #include "bert_layer_int8.h"
 #include "bert_quantize.h"
+#include "bert_util.h"
 
 class BertEncoder;
 BertContext* ctx;
@@ -60,21 +61,21 @@ public:
 
     if (is_int8) {
       // Quantize input
-      // uint8_t *y = reinterpret_cast<uint8_t *>(ctx->embQuantBuffer.Data());
-      // ctx->embQuantBuffer.SetQScheme(hpj::per_tensor_affine);
-      // float *scales = ctx->embQuantBuffer.Scales();
-      // int32_t *zp = ctx->embQuantBuffer.ZeroPoint();
-      // int stride = ctx->embQuantBuffer.Stride();
-      // QuantizeUtil::quantize_input(input_data, y, scales, zp,
-      //                              batch_size * seq_len, hidden_size,
-      //                              hidden_size, stride);
+      uint8_t *y = reinterpret_cast<uint8_t *>(ctx->embQuantBuffer.Data());
+      ctx->embQuantBuffer.SetQScheme(hpj::per_tensor_affine);
+      float *scales = ctx->embQuantBuffer.Scales();
+      int32_t *zp = ctx->embQuantBuffer.ZeroPoint();
+      int stride = ctx->embQuantBuffer.Stride();
+      QuantizeUtil::quantize_input(input_data, y, scales, zp,
+                                   batch_size * seq_len, hidden_size,
+                                   hidden_size, stride);
 
       for (int i = 0; i < _num_hidden_layers - 1; ++i) {
         hpj::Matrix<float> &outBuffer = (i % 2 == 0 ? ctx->outBuffer1 : ctx->outBuffer2);
         int8_bert_layers[i]->forward(*m_data, outBuffer, ctx->embQuantBuffer, ctx->embQuantBuffer);
         m_data = &outBuffer;
       }
-      
+
       // Last layer, copy result to output tensor
       int last = _num_hidden_layers - 1;
       int8_bert_layers[last]->forward(*m_data, out_matrix, ctx->embQuantBuffer, ctx->embQuantBuffer);

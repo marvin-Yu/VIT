@@ -268,6 +268,8 @@ class Matrix {
             this->Release();
             return;
         }
+        this->stride = cols;
+#if !defined(USE_ONEDNN) // No padding for oneDNN version
         if (cols > 16) {
             int skip = (16 - cols % 16) % 16;
             stride = cols + skip;
@@ -275,9 +277,8 @@ class Matrix {
             if (std::is_same<T, float>::value && (stride % 256 == 0)) {
                 stride += 4;
             }
-        } else {  // for narrow matrix, not padding any more
-            stride = cols;
         }
+#endif
         this->rows = rows;
         this->cols = cols;
         this->data.Resize(rows, cols, stride);
